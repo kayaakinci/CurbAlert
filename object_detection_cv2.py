@@ -8,7 +8,7 @@ import time
 
 
 class Camera_object_detection:
-    def __init__(self, model_path="yolov8n.pt", confidence_threshold=0.5, camera_id=0):
+    def __init__(self, model_path="yolov8n.pt", confidence_threshold=0.5, camera_id="/dev/video6"):
         self.confidence_threshold = confidence_threshold
         self.camera_id = camera_id
         
@@ -139,10 +139,15 @@ class Camera_object_detection:
 
 if __name__ == "__main__":
     # Create object detection instance
+    # detector = Camera_object_detection(
+    #     model_path="yolov8n.pt",  # can use yolov8n.pt, yolov8s.pt, yolov8m.pt, yolov8l.pt, or yolov8x.pt
+    #     confidence_threshold=0.5,
+    #     camera_id="/dev/video6"  # Use camera ID 0 (default), change if necessary
+    # )
     detector = Camera_object_detection(
-        model_path="yolov8n.pt",  # can use yolov8n.pt, yolov8s.pt, yolov8m.pt, yolov8l.pt, or yolov8x.pt
+        model_path="best.pt",
         confidence_threshold=0.5,
-        camera_id=0  # Use camera ID 0 (default), change if necessary
+        camera_id="/dev/video6"  # Optional
     )
 
     detector.run_detection()
