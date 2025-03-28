@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 import time
+import serial # for haptics
 
 
 class Camera_object_detection:
@@ -65,7 +66,7 @@ class Camera_object_detection:
     # function to apply both models to stream images
     def object_detection(self, rgb_image):
         # Run both models
-        stairs_results = self.stairs_model(rgb_image, conf=0.8)[0]
+        stairs_results = self.stairs_model(rgb_image, conf=self.confidence_threshold)[0]
         coco_results = self.coco_model(rgb_image, conf=self.confidence_threshold)[0]
         
         # Process results
@@ -188,6 +189,9 @@ class Camera_object_detection:
                 
                 # Detect objects
                 detections = self.object_detection(color_image)
+
+                if (detections != []):
+                    send_haptic_command("stairs")
                 
                 # Draw detections
                 annotated_image = self.draw_bounding_boxes(color_image.copy(), detections)
@@ -215,8 +219,23 @@ class Camera_object_detection:
             self.cap.release()
             cv2.destroyAllWindows()
 
+''' Different commands:
+"wall turn left"
+"wall turn right"
+"object turn left"
+"object turn right"
+"stairs"
+'''
+def send_haptic_command(command):
+    ser.write((command + "\n").encode())
+
+
 
 if __name__ == "__main__":
+    # Connecting to the haptics motor controller
+    ser = serial.Serial('/dev/ttyACM0', 9600)
+    time.sleep(2)
+
     # Create object detection instance with both models
     detector = Camera_object_detection(
         stairs_model_path="best.pt",  # Your fine-tuned stairs model
