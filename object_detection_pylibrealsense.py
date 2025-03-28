@@ -113,8 +113,32 @@ class Camera_object_detection:
             
         return detections
 
+    def get_depth_distances(self, depth_frame):
+        # convert depth frame to numpy array
+        depth_image = np.asanyarray(depth_frame.get_data())
+
+
+         # create 9 measurement points (3 columns, 3 rows)
+        height, width = depth_image.shape
+        thirds_x = [width // 4, width // 2, (3 * width) // 4]
+        thirds_y = [height // 4, height // 2, (3 * height) // 4]
+        measurement_points = [(x, y) for x in thirds_x for y in thirds_y]
+
+    
+
+        # scale depth measurement points to color
+        x_scale = 1280 / 640
+        y_scale = 720 / 480
+        # store depths in dict
+        measurement_points = {(x,y): depth_frame.get_distance(x, y) for x,y in measurement_points}
+        # calculate final distances by scaling the depth distance to color distance
+        final_distances = {(int(x *x_scale), int(y *y_scale)): distance for (x, y), distance in measurement_points.items()}
+
+        return final_distances
+
+        
      # Drawing the bounding boxes on the image of the frame of the stream
-    def draw_bounding_boxes(self, image, detections):
+    def draw_bounding_boxes(self, image, detections, distances):
         # Track object counts
         object_counts = {}
         
@@ -157,6 +181,12 @@ class Camera_object_detection:
                 (0, 0, 0), 
                 2
             )
+
+        # draw distance circles
+        for (x, y), distance in distances.items():
+            cv2.circle(image, (x, y), 5, (0, 255, 0), -1)
+            cv2.putText(image, f"{distance:.2f}m", (x - 30, y - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         
         # Show object counts
         y_offset = 60  # Start below FPS counter
@@ -184,16 +214,17 @@ class Camera_object_detection:
                 start_time = time.time()
 
                 # Process frames
-                color_image, _ = self.process_stream()
+                color_image, depth_image = self.process_stream()
                 if color_image is None:
                     print("Failed to capture frame")
                     continue
 
                 # Detect objects
                 detections = self.object_detection(color_image)
+                distances = self.get_depth_distances(depth_image)
 
                 # Draw detections
-                annotated_image = self.draw_bounding_boxes(color_image.copy(), detections)
+                annotated_image = self.draw_bounding_boxes(color_image.copy(), detections, distances)
 
                 # Calculate FPS
                 fps = 1.0 / (time.time() - start_time)
