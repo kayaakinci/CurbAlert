@@ -65,7 +65,7 @@ class Camera_object_detection:
     # function to apply both models to stream images
     def object_detection(self, rgb_image):
         # Run both models
-        stairs_results = self.stairs_model(rgb_image, conf=self.confidence_threshold)[0]
+        stairs_results = self.stairs_model(rgb_image, conf=0.8)[0]
         coco_results = self.coco_model(rgb_image, conf=self.confidence_threshold)[0]
         
         # Process results
