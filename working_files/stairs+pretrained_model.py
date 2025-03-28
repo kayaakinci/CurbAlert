@@ -177,6 +177,8 @@ class Camera_object_detection:
         return image
 
     def run_detection(self):
+        command = "none"
+        prev_command = "n/a"
         try:
             while True:
                 start_time = time.time()
@@ -190,8 +192,13 @@ class Camera_object_detection:
                 # Detect objects
                 detections = self.object_detection(color_image)
 
-                # if (detections != []):
-                #     send_haptic_command("stairs")
+                if (detections != []):
+                    prev_command = command
+                    command = "wall turn left"
+                else:
+                    prev_command = command
+                    command = "none"
+                send_haptic_command(command, prev_command)
                 
                 # Draw detections
                 annotated_image = self.draw_bounding_boxes(color_image.copy(), detections)
@@ -235,8 +242,8 @@ def send_haptic_command(command):
 
 if __name__ == "__main__":
     # Connecting to the haptics motor controller
-    # ser = serial.Serial('/dev/ttyACM0', 9600)
-    # time.sleep(2)
+    ser = serial.Serial('/dev/ttyACM0', 9600)
+    time.sleep(2)
 
     # Create object detection instance with both models
     detector = Camera_object_detection(
