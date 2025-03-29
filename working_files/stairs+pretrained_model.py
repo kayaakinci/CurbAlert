@@ -3,27 +3,23 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 import time
+import pyrealsense2 as rs
 import serial # for haptics
-
 
 class Camera_object_detection:
     def __init__(self, 
                  stairs_model_path="best.pt", 
                  coco_model_path="yolov8n.pt", 
-                 confidence_threshold=0.5, 
-                 camera_id="/dev/video6"):
+                 confidence_threshold=0.5):
         self.confidence_threshold = confidence_threshold
-        self.camera_id = camera_id
-        
-        # Initialize the camera
-        self.cap = cv2.VideoCapture(self.camera_id)
-        if not self.cap.isOpened():
-            raise Exception(f"Could not open camera with ID {self.camera_id}")
-            
-        # Set resolution if needed
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        
+
+        # start pylibrealse stream pipeline
+        self.pipeline = rs.pipeline()
+        self.config = rs.config()
+        self.config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+        self.config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        self.pipeline.start(self.config)
+
         # Loading two models:
         # 1. Fine-tuned stairs model
         print(f"Loading stairs model: {stairs_model_path}")
@@ -36,8 +32,8 @@ class Camera_object_detection:
         self.coco_model = YOLO(coco_model_path)
         self.coco_model_classes = self.coco_model.names
         print(f"COCO model loaded with {len(self.coco_model_classes)} classes")
-        
-        # Combined class names
+
+       # Combined class names
         self.model_class_names = self.coco_model_classes.copy()
         # Add stairs class if not already in COCO classes
         if 'stairs' not in self.model_class_names.values():
@@ -55,20 +51,25 @@ class Camera_object_detection:
         # Window
         cv2.namedWindow("Object Detection", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("Object Detection", 1280, 720)
-
+        
     # Function to process camera frames
     def process_stream(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            return None
-        return frame
+        frames = self.pipeline.wait_for_frames()
+        depth_frame = frames.get_depth_frame()
+        color_frame = frames.get_color_frame()
 
-    # function to apply both models to stream images
+        if not depth_frame or not color_frame:
+            return None, None
+
+        # Convert color image to numpy array
+        color_image = np.asanyarray(color_frame.get_data())
+        return color_image, depth_frame
+
     def object_detection(self, rgb_image):
         # Run both models
-        stairs_results = self.stairs_model(rgb_image, conf=self.confidence_threshold)[0]
+        stairs_results = self.stairs_model(rgb_image, conf=0.8)[0]
         coco_results = self.coco_model(rgb_image, conf=self.confidence_threshold)[0]
-        
+
         # Process results
         detections = []
         
@@ -88,6 +89,7 @@ class Camera_object_detection:
                 'confidence': confidence,
                 'bbox': (int(x1), int(y1), int(width), int(height))
             })
+        
         
         # Then process COCO model results
         for result in coco_results.boxes.data.tolist():
@@ -110,9 +112,33 @@ class Camera_object_detection:
             })
             
         return detections
+
+    def get_depth_distances(self, depth_frame):
+        # convert depth frame to numpy array
+        depth_image = np.asanyarray(depth_frame.get_data())
+
+
+         # create 9 measurement points (3 columns, 3 rows)
+        height, width = depth_image.shape
+        thirds_x = [width // 4, width // 2, (3 * width) // 4]
+        thirds_y = [height // 4, height // 2, (3 * height) // 4]
+        measurement_points = [(x, y) for x in thirds_x for y in thirds_y]
+
     
-    # Drawing the bounding boxes on the image of the frame of the stream
-    def draw_bounding_boxes(self, image, detections):
+
+        # scale depth measurement points to color
+        x_scale = 1280 / 640
+        y_scale = 720 / 480
+        # store depths in dict
+        measurement_points = {(x,y): depth_frame.get_distance(x, y) for x,y in measurement_points}
+        # calculate final distances by scaling the depth distance to color distance
+        final_distances = {(int(x *x_scale), int(y *y_scale)): distance for (x, y), distance in measurement_points.items()}
+
+        return final_distances
+
+        
+     # Drawing the bounding boxes on the image of the frame of the stream
+    def draw_bounding_boxes(self, image, detections, distances):
         # Track object counts
         object_counts = {}
         
@@ -155,6 +181,12 @@ class Camera_object_detection:
                 (0, 0, 0), 
                 2
             )
+
+        # draw distance circles
+        for (x, y), distance in distances.items():
+            cv2.circle(image, (x, y), 5, (0, 255, 0), -1)
+            cv2.putText(image, f"{distance:.2f}m", (x - 30, y - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         
         # Show object counts
         y_offset = 60  # Start below FPS counter
@@ -182,27 +214,29 @@ class Camera_object_detection:
         try:
             while True:
                 start_time = time.time()
-                
+
                 # Process frames
-                color_image = self.process_stream()
+                color_image, depth_image = self.process_stream()
                 if color_image is None:
                     print("Failed to capture frame")
                     continue
-                
+
                 # Detect objects
                 detections = self.object_detection(color_image)
+                distances = self.get_depth_distances(depth_image)
 
                 if (detections != []):
+                    # decide_haptic_response(detections, walls)
                     prev_command = command
                     command = "wall turn left"
                 else:
                     prev_command = command
                     command = "none"
                 send_haptic_command(command, prev_command)
-                
+
                 # Draw detections
-                annotated_image = self.draw_bounding_boxes(color_image.copy(), detections)
-                
+                annotated_image = self.draw_bounding_boxes(color_image.copy(), detections, distances)
+
                 # Calculate FPS
                 fps = 1.0 / (time.time() - start_time)
                 cv2.putText(
@@ -214,16 +248,18 @@ class Camera_object_detection:
                     (0, 255, 0), 
                     2
                 )
-                
+
                 cv2.imshow("Object Detection", annotated_image)
-                
+
                 # Exit on ESC key
                 key = cv2.waitKey(1)
                 if key == 27:  # esc
                     break
                 
-        finally:  # happens whether an exception is raised or not
-            self.cap.release()
+
+        finally:
+            # happens whether an exception is raised or not
+            self.pipeline.stop()
             cv2.destroyAllWindows()
 
 ''' Different commands:
@@ -233,10 +269,47 @@ class Camera_object_detection:
 "object turn right"
 "stairs"
 '''
-def send_haptic_command(command):
-    print("Sending stairs haptic...\n")
-    ser.write((command + "\n").encode())
-    print("Done sending")
+def send_haptic_command(command, prev_command):
+    print("Starting stair haptic...\n")
+    if (prev_command != command):
+        ser.write((command + "\n").encode())
+        print("Haptic command sent")
+    else:
+        print("no haptics")
+
+""" Deciding haptic response (need to get wall data and distance data for this function)
+based on the x location of nearest hazard in frame (in center third of frame)
+"""
+# def decide_haptic_response(detections, walls):
+#     nearest_hazard = None
+#     second_nearest = None
+#     nearest_distance = None
+#     second_distance = None
+#     for detection in detections:
+#         x, y, w, h = detection['bbox']
+#         x_center = x + (x + w)//2
+#         x_right = x + w
+#         x_left = x
+#         curr_distance = None # fix later
+
+#         if (CENTER_REGION[0] < x_right or x_left < CENTER_REGION[1]):
+#             if (curr_distance >= nearest_distance):
+#                 second_distance = nearest_distance
+#                 nearest_distance = curr_distance
+#                 second_nearest = nearest_hazard
+#                 nearest_hazard = detection 
+#             elif (curr_distance >= second_distance):
+#                 second_distance = curr_distance
+#                 second_nearest = detection
+#         else:
+#             if (curr_distance >= second_distance):
+#                 second_distance = curr_distance
+#                 second_nearest = detection
+            
+#     # Deciding object haptic response to send
+#     if (detection["class_id"] == "stairs"):
+#         return "stairs"
+#     elif ():
 
 
 
@@ -245,12 +318,12 @@ if __name__ == "__main__":
     ser = serial.Serial('/dev/ttyACM0', 9600)
     time.sleep(2)
 
-    # Create object detection instance with both models
+    # middle of screen region where objects are hazards
+    CENTER_REGION = (int(cv2.CAP_PROP_FRAME_WIDTH * 0.33), int(cv2.CAP_PROP_FRAME_WIDTH * 0.66))
+    
     detector = Camera_object_detection(
-        stairs_model_path="best.pt",  # Your fine-tuned stairs model
-        coco_model_path="yolov8n.pt",  # Original COCO model
-        confidence_threshold=0.5,
-        camera_id="/dev/video6"
+        stairs_model_path="best.pt",
+        coco_model_path="yolov8n.pt",
+        confidence_threshold=0.5
     )
-
     detector.run_detection()
