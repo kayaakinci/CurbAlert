@@ -187,6 +187,10 @@ class Camera_object_detection:
             cv2.rectangle(image, (x, y), (x + w, y + h), color, 2)
             
             label = f"{class_name} ({confidence:.2f})"
+
+            if (class_name == "oven"):
+                label = f"stairs ({confidence: .2f})"
+                color = (255, 0, 0)
             
             # Draw background
             label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
@@ -271,22 +275,22 @@ class Camera_object_detection:
 
                 # Calculate FPS
                 fps = 1.0 / (time.time() - start_time)
-                cv2.putText(
-                    annotated_image, 
-                    f"FPS: {fps:.2f}", 
-                    (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    1, 
-                    (0, 255, 0), 
-                    2
-                )
+                # cv2.putText(
+                #     annotated_image, 
+                #     f"FPS: {fps:.2f}", 
+                #     (10, 30), 
+                #     cv2.FONT_HERSHEY_SIMPLEX, 
+                #     1, 
+                #     (0, 255, 0), 
+                #     2
+                # )
 
-                cv2.imshow("Object Detection", annotated_image)
+                # cv2.imshow("Object Detection", annotated_image)
 
-                # Exit on ESC key
-                key = cv2.waitKey(1)
-                if key == 27:  # esc
-                    break
+                # # Exit on ESC key
+                # key = cv2.waitKey(1)
+                # if key == 27:  # esc
+                #     break
                 
 
         finally:
@@ -362,6 +366,8 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION):
         
         if (CENTER_REGION[0] < x_right or x_left < CENTER_REGION[1]):
             if (detection["class_name"] == "stairs"):
+                return "stairs"
+            elif (detection["class_name"] == "oven"):
                 return "stairs"
             if (curr_distance != 0 and (nearest_distance == None or curr_distance <= nearest_distance)):
                 second_distance = nearest_distance
