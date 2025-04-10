@@ -22,14 +22,17 @@ class Camera_object_detection:
 
         # Loading two models:
         # 1. Fine-tuned stairs model
+
         print(f"Loading stairs model: {stairs_model_path}")
         self.stairs_model = YOLO(stairs_model_path)
+
         self.stairs_model_classes = self.stairs_model.names
         print(f"Stairs model loaded with {len(self.stairs_model_classes)} classes")
         
         # 2. Original COCO model for all other objects
         print(f"Loading COCO model: {coco_model_path}")
         self.coco_model = YOLO(coco_model_path)
+
         self.coco_model_classes = self.coco_model.names
         print(f"COCO model loaded with {len(self.coco_model_classes)} classes")
 
@@ -146,17 +149,20 @@ class Camera_object_detection:
 
          # create 9 measurement points (3 columns, 3 rows)
         height, width = depth_image.shape
-        thirds_x = [width // 4, width // 2, (3 * width) // 4]
-        thirds_y = [height // 4, height // 2, (3 * height) // 4]
-        measurement_points = [(x, y) for x in thirds_x for y in thirds_y]
 
+        offset = 25 # offset off of the width/height
+        
+        points = [(offset, offset),
+                (width // 2, offset),
+                (width - offset, offset),
+                (width - offset, height // 2),
+                  (offset, height // 2)]
     
-
         # scale depth measurement points to color
         x_scale = 1280 / 640
         y_scale = 720 / 480
         # store depths in dict
-        measurement_points = {(x,y): depth_frame.get_distance(x, y) for x,y in measurement_points}
+        measurement_points = {(x,y): depth_frame.get_distance(x, y) for x,y in points}
         # calculate final distances by scaling the depth distance to color distance
         final_distances = {(int(x *x_scale), int(y *y_scale)): distance for (x, y), distance in measurement_points.items()}
 
@@ -252,6 +258,15 @@ class Camera_object_detection:
                     print("Failed to capture frame")
                     continue
 
+                # Wall Detection
+                wall_distances = self.get_depth_distances(depth_image)
+
+                # Draw Wall Detection spots
+                for (x,y), distance in wall_distances.items():
+                    cv2.circle(color_image, (x, y), 6, (0, 0, 255), -1)
+                    cv2.putText(color_image, f"{distance:.2f}m", (x+5, y-5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
+
 
                 # middle of screen region where objects are hazards
                 CENTER_REGION = (int(color_image.shape[1] * 0.4), int(color_image.shape[1] * 0.6))
@@ -260,7 +275,6 @@ class Camera_object_detection:
                 # Detect objects
                 # detections = self.object_detection(color_image)
                 detections, distances = self.object_detection(color_image, depth_image)
-                # distances = self.get_depth_distances(depth_image)
 
                 if (detections != []):
                     prev_command = command
@@ -275,22 +289,27 @@ class Camera_object_detection:
 
                 # Calculate FPS
                 fps = 1.0 / (time.time() - start_time)
-                # cv2.putText(
-                #     annotated_image, 
-                #     f"FPS: {fps:.2f}", 
-                #     (10, 30), 
-                #     cv2.FONT_HERSHEY_SIMPLEX, 
-                #     1, 
-                #     (0, 255, 0), 
-                #     2
-                # )
 
-                # cv2.imshow("Object Detection", annotated_image)
 
-                # # Exit on ESC key
-                # key = cv2.waitKey(1)
-                # if key == 27:  # esc
-                #     break
+                
+                cv2.putText(
+                    annotated_image, 
+                    f"FPS: {fps:.2f}", 
+                    (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    1, 
+                    (0, 255, 0), 
+                    2
+                )
+
+                    
+
+                cv2.imshow("Object Detection", annotated_image)
+
+                # Exit on ESC key
+                key = cv2.waitKey(1)
+                if key == 27:  # esc
+                    break
                 
 
         finally:
