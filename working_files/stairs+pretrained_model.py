@@ -142,6 +142,29 @@ class Camera_object_detection:
             
         return detections, distances
 
+    def find_wall_detections(self, list_of_points):
+        walls = []
+        for i in range(len(list_of_points)):
+            (p1, d1) = list_of_points[i]
+            if d1 == 0:
+                # skip invalid distances of 0
+                continue
+            for j in range(i + 1, len(list_of_points)):
+                (p2, d2) = list_of_points[j]
+                if d2 == 0:
+                    continue
+                    # skip invalid distances of 0
+
+                if abs(d1 - d2) < 0.05:
+                    wall_location = {
+                        "mid_point": (p1, p2), 
+                        "class_name": "walls",
+                        "distance": d2}
+                    walls.append(wall_location)
+        return walls
+    
+                    
+    # function for getting the depth distances of walls and determining if there is a wall
     def get_depth_distances(self, depth_frame):
         # convert depth frame to numpy array
         depth_image = np.asanyarray(depth_frame.get_data())
@@ -166,7 +189,13 @@ class Camera_object_detection:
         # calculate final distances by scaling the depth distance to color distance
         final_distances = {(int(x *x_scale), int(y *y_scale)): distance for (x, y), distance in measurement_points.items()}
 
-        return final_distances
+        # check for close distance wall pairs
+        list_of_points = list(final_distances.items())
+
+
+        wall_detections = self.find_wall_detections(list_of_points)
+                    
+        return final_distances, wall_detections
 
 
     
@@ -259,33 +288,38 @@ class Camera_object_detection:
                     continue
 
                 # Wall Detection
-                wall_distances = self.get_depth_distances(depth_image)
+                wall_distances, wall_detections = self.get_depth_distances(depth_image)
 
-                # Draw Wall Detection spots
+                # Draw distance points
                 for (x,y), distance in wall_distances.items():
                     cv2.circle(color_image, (x, y), 6, (0, 0, 255), -1)
                     cv2.putText(color_image, f"{distance:.2f}m", (x+5, y-5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
 
-
+                # draw wall detections
+                for item in wall_detections:
+                    (p1, p2) = item["mid_point"]
+                    cv2.circle(color_image, p1, 10, (255, 0, 255), -1)
+                    cv2.circle(color_image, p2, 10, (255, 0, 255), -1)
+                
                 # middle of screen region where objects are hazards
                 CENTER_REGION = (int(color_image.shape[1] * 0.4), int(color_image.shape[1] * 0.6))
                 CENTER_X = color_image.shape[1] // 2
 
                 # Detect objects
                 # detections = self.object_detection(color_image)
-                detections, distances = self.object_detection(color_image, depth_image)
+                object_detections, distances = self.object_detection(color_image, depth_image)
 
-                if (detections != []):
+                if (object_detections != [] or wall_detections != []):
                     prev_command = command
-                    command = decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION)
+                    command = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
                 else:
                     prev_command = command
                     command = "none"
                 send_haptic_command(command, prev_command)
 
                 # Draw detections
-                annotated_image = self.draw_bounding_boxes(color_image.copy(), detections, distances)
+                annotated_image = self.draw_bounding_boxes(color_image.copy(), object_detections, distances)
 
                 # Calculate FPS
                 fps = 1.0 / (time.time() - start_time)
@@ -369,11 +403,12 @@ def decide_object_action(nearest_hazard, second_hazard, CENTER_X):
 """ Deciding haptic response (need to get wall data and distance data for this function)
 based on the x location of nearest hazard in frame (in center third of frame)
 """
-def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION):
+def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_detections):
     nearest_hazard = None
     second_nearest = None
     nearest_distance = None
     second_distance = None
+    # detections [((),())]
     for i in range(len(detections)):
         detection = detections[i]
         curr_distance = distances[i]
@@ -402,12 +437,32 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION):
                 second_nearest = detection
     
     # Deciding object haptic response to send
-    if (nearest_hazard["class_id"] == "stairs"):
+    if (nearest_hazard == None):
+        return "none"
+    if (nearest_hazard["class_name"] == "stairs"):
         return "stairs"
+    elif (nearest_hazard["class_name"] == "walls"):
+        return decide_wall_action(nearest_hazard, CENTER_X)
     else:
         return decide_object_action(nearest_hazard, second_nearest, CENTER_X)
 
+# decides the proper move after detecting a wall
+def decide_wall_action(nearest_hazard, CENTER_X):
+    center_pt = get_center_point(nearest_hazard["mid_point"])
 
+    if (center_pt < CENTER_X):
+        return "wall turn right"
+    else:
+        return "wall turn left"
+
+# gets the center of two wall detection points 
+def get_center_point(two_points):
+    p1, p2 = two_points
+    x1, y1 = p1
+    x2, y2 = p2
+    center_x = (x1 + x2) / 2
+    center_y = (y1 + y2) / 2
+    return (center_x,center_y) 
 
 if __name__ == "__main__":
     # Connecting to the haptics motor controller
