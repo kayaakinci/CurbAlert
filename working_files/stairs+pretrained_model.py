@@ -139,6 +139,7 @@ class Camera_object_detection:
             center_x = int(x1 + (width//2))
             center_y = int(y1 + (height//2))
             distances.append(((center_x, center_y), self.get_distance_from_point(depth_frame, center_x, center_y)))
+            # distances.append(self.get_distance_from_point(depth_frame, center_x, center_y))
             
         return detections, distances
 
@@ -327,29 +328,29 @@ class Camera_object_detection:
                     send_haptic_command(command, prev_command)
     
                     # Draw detections
-                    # annotated_image = self.draw_bounding_boxes(color_image.copy(), object_detections, distances)
+                    annotated_image = self.draw_bounding_boxes(color_image.copy(), object_detections, distances)
     
                     # Calculate FPS
                     fps = 1.0 / (time.time() - start_time)
     
     
                     
-                    # cv2.putText(
-                    #     annotated_image, 
-                    #     f"FPS: {fps:.2f}", 
-                    #     (10, 30), 
-                    #     cv2.FONT_HERSHEY_SIMPLEX, 
-                    #     1, 
-                    #     (0, 255, 0), 
-                    #     2
-                    # )
+                    cv2.putText(
+                        annotated_image, 
+                        f"FPS: {fps:.2f}", 
+                        (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, 
+                        (0, 255, 0), 
+                        2
+                    )
     
                         
     
-                    # cv2.imshow("Object Detection", annotated_image)
-                # else:
-                    # cv2.putText(color_image, "Model Paused", (500, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
-                    # cv2.imshow("Object Detection", color_image)
+                    cv2.imshow("Object Detection", annotated_image)
+                else:
+                    cv2.putText(color_image, "Model Paused", (500, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+                    cv2.imshow("Object Detection", color_image)
     
                     
     
@@ -374,11 +375,11 @@ class Camera_object_detection:
 '''
 def send_haptic_command(command, prev_command):
     # print("Starting stair haptic...\n")
-    if (prev_command != command):
-        ser.write((command + "\n").encode())
-        print(f"Haptic command {command} sent")
-    else:
-        print("no haptics")
+    # if (prev_command != command):
+    ser.write((command + "\n").encode())
+    print(f"Haptic command {command} sent")
+    # else:
+        # print("no haptics")
 
 def decide_object_action(nearest_hazard, second_hazard, CENTER_X):
     action = "none"
@@ -425,7 +426,7 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_
     # detections [((),())]
     for i in range(len(detections)):
         detection = detections[i]
-        curr_distance = distances[i]
+        curr_distance = distances[i][1]
     # for detection in detections:
         x, y, w, h = detection['bbox']
         x_center = x + (x + w)//2
@@ -449,13 +450,25 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_
             if (curr_distance != 0 and (second_distance == None or curr_distance <= second_distance)):
                 second_distance = curr_distance
                 second_nearest = detection
-    
+
+    print("Nearest Hazard is: \n", nearest_hazard, "\n")
+    print("Nearest Distance is : \n", nearest_distance, "\n")
+    print("Wall Detections ", wall_detections)
+    # look through wall detections
+    for wall in wall_detections:
+        wall_dist = wall["distance"]
+        if (nearest_hazard is None or wall_dist <= nearest_distance):
+            nearest_distance = wall_dist
+            nearest_hazard = wall
+    print("   After wall search, nearest hazard is", nearest_hazard)
+            
     # Deciding object haptic response to send
     if (nearest_hazard == None):
         return "none"
     if (nearest_hazard["class_name"] == "stairs"):
         return "stairs"
     elif (nearest_hazard["class_name"] == "walls"):
+        print("\n \n\nWall action function...         ")
         return decide_wall_action(nearest_hazard, CENTER_X)
     else:
         return decide_object_action(nearest_hazard, second_nearest, CENTER_X)
@@ -463,8 +476,11 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_
 # decides the proper move after detecting a wall
 def decide_wall_action(nearest_hazard, CENTER_X):
     center_pt = get_center_point(nearest_hazard["mid_point"])
+    detection_x = center_pt[0]
 
-    if (center_pt < CENTER_X):
+    print("CENTER_X", CENTER_X)
+    print("\n detection_x : ", detection_x)
+    if (detection_x < CENTER_X):
         return "wall turn right"
     else:
         return "wall turn left"
