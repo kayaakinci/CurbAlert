@@ -151,24 +151,29 @@ class Camera_object_detection:
 
     def find_wall_detections(self, list_of_points):
         walls = []
-        for i in range(len(list_of_points)):
+        print("In wall detections \n")
+        print( "\nList of points ", list_of_points)
+
+        print("\n Length is: ", len(list_of_points))
+        for i in range(len(list_of_points) -1 ):
             (p1, d1) = list_of_points[i]
+            print("\n point 1 :", (p1, d1)) 
             if d1 == 0:
                 # skip invalid distances of 0
                 continue
-            for j in range(i + 1, len(list_of_points)):
-                (p2, d2) = list_of_points[j]
-                if d2 == 0:
-                    continue
+            (p2, d2) = list_of_points[i + 1]
+            print(" \nsecond point: ", (p2, d2), "\n\n")
+            if d2 == 0:
+                continue
                     # skip invalid distances of 0
-
-                if abs(d1 - d2) < 0.05:
-                    wall_location = {
-                        "mid_point": (p1, p2), 
-                        "class_name": "walls",
-                        "distance": d2}
-                    if (wall_location["distance"] > 0 and wall_location["distance"] <= 2.2):
-                        walls.append(wall_location)
+                    # only compare vertically aligned points
+            if abs(d1 - d2) < 0.05:
+                wall_location = {
+                    "mid_point": (p1, p2), 
+                    "class_name": "walls",
+                    "distance": d2}
+                if (wall_location["distance"] > 0 and wall_location["distance"] <= 2.2):
+                    walls.append(wall_location)
         return walls
     
                     
@@ -181,27 +186,33 @@ class Camera_object_detection:
          # create 9 measurement points (3 columns, 3 rows)
         height, width = depth_image.shape
 
-        offset = 25 # offset off of the width/height
-        
-        points = [(offset, offset),
-                (width // 2, offset),
-                (width - offset, offset),
-                (width - offset, height // 2),
-                  (offset, height // 2)]
+        offset1 = int(.2 * width)  # offset off of the width/height
+        offset2 = int(.4 * width) 
+
+        points = [(offset1, height // 2),
+                  (offset1, 100),
+                  (offset2, height // 2),
+                   (offset2, 100),
+                  (width - offset1, height // 2),
+                  (width - offset1, 100),
+                  (width - offset2, height // 2),
+                   (width - offset2,100)]
+                  
     
         # scale depth measurement points to color
         x_scale = 1280 / 640
         y_scale = 720 / 480
         # store depths in dict
         measurement_points = {(x,y): depth_frame.get_distance(x, y) for x,y in points}
+
         # calculate final distances by scaling the depth distance to color distance
         final_distances = {(int(x *x_scale), int(y *y_scale)): distance for (x, y), distance in measurement_points.items()}
 
         # check for close distance wall pairs
         list_of_points = list(final_distances.items())
 
-
         wall_detections = self.find_wall_detections(list_of_points)
+        print("\n\n Wall Detections are: ", wall_detections) 
                     
         return final_distances, wall_detections
 
