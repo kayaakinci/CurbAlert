@@ -87,8 +87,8 @@ class Camera_object_detection:
     # Now returns list of objects detected along with list of distances to the center points of the objects
     def object_detection(self, rgb_image, depth_frame):
         # Run both models
-        stairs_results = self.stairs_model(rgb_image, conf=0.7)[0]
-        coco_results = self.coco_model(rgb_image, conf=self.confidence_threshold)[0]
+        stairs_results = self.stairs_model(rgb_image, conf=0.7, verbose=False)[0]
+        coco_results = self.coco_model(rgb_image, conf=self.confidence_threshold, verbose=False)[0]
 
         # Process results
         detections = []
@@ -277,8 +277,15 @@ class Camera_object_detection:
     def run_detection(self):
         command = "none"
         prev_command = "n/a"
+        state = "OFF" # initalize state to be off
         try:
             while True:
+                if ser.in_waiting >0:
+                    line = ser.readline().decode('utf-8').strip()
+                    if line in ["ON", "OFF"]:
+                        state = line
+                        
+            
                 start_time = time.time()
 
                 # Process frames
@@ -286,59 +293,66 @@ class Camera_object_detection:
                 if color_image is None:
                     print("Failed to capture frame")
                     continue
-
-                # Wall Detection
-                wall_distances, wall_detections = self.get_depth_distances(depth_image)
-
-                # Draw distance points
-                for (x,y), distance in wall_distances.items():
-                    cv2.circle(color_image, (x, y), 6, (0, 0, 255), -1)
-                    cv2.putText(color_image, f"{distance:.2f}m", (x+5, y-5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
-
-                # draw wall detections
-                for item in wall_detections:
-                    (p1, p2) = item["mid_point"]
-                    cv2.circle(color_image, p1, 10, (255, 0, 255), -1)
-                    cv2.circle(color_image, p2, 10, (255, 0, 255), -1)
-                
-                # middle of screen region where objects are hazards
-                CENTER_REGION = (int(color_image.shape[1] * 0.4), int(color_image.shape[1] * 0.6))
-                CENTER_X = color_image.shape[1] // 2
-
-                # Detect objects
-                # detections = self.object_detection(color_image)
-                object_detections, distances = self.object_detection(color_image, depth_image)
-
-                if (object_detections != [] or wall_detections != []):
-                    prev_command = command
-                    command = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
-                else:
-                    prev_command = command
-                    command = "none"
-                send_haptic_command(command, prev_command)
-
-                # Draw detections
-                annotated_image = self.draw_bounding_boxes(color_image.copy(), object_detections, distances)
-
-                # Calculate FPS
-                fps = 1.0 / (time.time() - start_time)
-
-
-                
-                cv2.putText(
-                    annotated_image, 
-                    f"FPS: {fps:.2f}", 
-                    (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    1, 
-                    (0, 255, 0), 
-                    2
-                )
-
+                if state == "ON":
                     
-
-                cv2.imshow("Object Detection", annotated_image)
+                    # Wall Detection
+                    wall_distances, wall_detections = self.get_depth_distances(depth_image)
+    
+                    # Draw distance points
+                    for (x,y), distance in wall_distances.items():
+                        cv2.circle(color_image, (x, y), 6, (0, 0, 255), -1)
+                        cv2.putText(color_image, f"{distance:.2f}m", (x+5, y-5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
+    
+                    # draw wall detections
+                    for item in wall_detections:
+                        (p1, p2) = item["mid_point"]
+                        cv2.circle(color_image, p1, 10, (255, 0, 255), -1)
+                        cv2.circle(color_image, p2, 10, (255, 0, 255), -1)
+                    
+                    # middle of screen region where objects are hazards
+                    CENTER_REGION = (int(color_image.shape[1] * 0.4), int(color_image.shape[1] * 0.6))
+                    CENTER_X = color_image.shape[1] // 2
+    
+                    # Detect objects
+                    # detections = self.object_detection(color_image)
+                    object_detections, distances = self.object_detection(color_image, depth_image)
+    
+                    if (object_detections != [] or wall_detections != []):
+                        prev_command = command
+                        command = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
+                    else:
+                        prev_command = command
+                        command = "none"
+                    send_haptic_command(command, prev_command)
+    
+                    # Draw detections
+                    # annotated_image = self.draw_bounding_boxes(color_image.copy(), object_detections, distances)
+    
+                    # Calculate FPS
+                    fps = 1.0 / (time.time() - start_time)
+    
+    
+                    
+                    # cv2.putText(
+                    #     annotated_image, 
+                    #     f"FPS: {fps:.2f}", 
+                    #     (10, 30), 
+                    #     cv2.FONT_HERSHEY_SIMPLEX, 
+                    #     1, 
+                    #     (0, 255, 0), 
+                    #     2
+                    # )
+    
+                        
+    
+                    # cv2.imshow("Object Detection", annotated_image)
+                # else:
+                    # cv2.putText(color_image, "Model Paused", (500, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+                    # cv2.imshow("Object Detection", color_image)
+    
+                    
+    
 
                 # Exit on ESC key
                 key = cv2.waitKey(1)
@@ -359,10 +373,10 @@ class Camera_object_detection:
 "stairs"
 '''
 def send_haptic_command(command, prev_command):
-    print("Starting stair haptic...\n")
+    # print("Starting stair haptic...\n")
     if (prev_command != command):
         ser.write((command + "\n").encode())
-        print("Haptic command sent")
+        print(f"Haptic command {command} sent")
     else:
         print("no haptics")
 
@@ -468,11 +482,12 @@ if __name__ == "__main__":
     # Connecting to the haptics motor controller
     ser = serial.Serial('/dev/ttyACM0', 9600)
     time.sleep(2)
+        
 
-    
     detector = Camera_object_detection(
         stairs_model_path="best.pt",
         coco_model_path="yolov8n.pt",
         confidence_threshold=0.5
     )
     detector.run_detection()
+
