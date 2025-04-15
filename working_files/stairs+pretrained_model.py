@@ -85,7 +85,7 @@ class Camera_object_detection:
     
     # def object_detection(self, rgb_image):
     # Now returns list of objects detected along with list of distances to the center points of the objects
-    def object_detection(self, rgb_image, depth_frame):
+    def object_detection(self, rgb_image, depth_frame, CENTER_REGION):
         # Run both models
         stairs_results = self.stairs_model(rgb_image, conf=0.7, verbose=False)[0]
         coco_results = self.coco_model(rgb_image, conf=self.confidence_threshold, verbose=False)[0]
@@ -103,17 +103,20 @@ class Camera_object_detection:
             
             width = x2 - x1
             height = y2 - y1
-            
-            detections.append({
-                'class_id': self.stairs_class_id,  # Use our stairs class ID
-                'class_name': 'stairs',
-                'confidence': confidence,
-                'bbox': (int(x1), int(y1), int(width), int(height))
-            })
 
             center_x = int(x1 + (width//2))
             center_y = int(y1 + (height//2))
-            distances.append(((center_x, center_y), self.get_distance_from_point(depth_frame, center_x, center_y)))
+            hazard_dist = self.get_distance_from_point(depth_frame, center_x, center_y)
+            if (hazard_dist > 0 and hazard_dist <= 2.2):
+                # Checking if in center of frame
+                if ((x1 >= CENTER_REGION[0] and x1 < CENTER_REGION[1]) or (x2 <= CENTER_REGION[1] and x2 > CENTER_REGION[0])):
+                    distances.append(((center_x, center_y), hazard_dist))
+                    detections.append({
+                        'class_id': self.stairs_class_id,  # Use our stairs class ID
+                        'class_name': 'stairs',
+                        'confidence': confidence,
+                        'bbox': (int(x1), int(y1), int(width), int(height))
+                    })
         
         
         # Then process COCO model results
@@ -128,17 +131,20 @@ class Camera_object_detection:
                 
             width = x2 - x1
             height = y2 - y1
-            
-            detections.append({
-                'class_id': class_id,
-                'class_name': self.coco_model_classes.get(class_id, 'unknown'),
-                'confidence': confidence,
-                'bbox': (int(x1), int(y1), int(width), int(height))
-            })
 
             center_x = int(x1 + (width//2))
             center_y = int(y1 + (height//2))
-            distances.append(((center_x, center_y), self.get_distance_from_point(depth_frame, center_x, center_y)))
+            hazard_dist = self.get_distance_from_point(depth_frame, center_x, center_y)
+            
+            if (hazard_dist > 0 and hazard_dist <= 2.2):
+                if ((x1 >= CENTER_REGION[0] and x1 < CENTER_REGION[1]) or (x2 <= CENTER_REGION[1] and x2 > CENTER_REGION[0])):
+                    distances.append(((center_x, center_y), hazard_dist))
+                    detections.append({
+                        'class_id': class_id,
+                        'class_name': self.coco_model_classes.get(class_id, 'unknown'),
+                        'confidence': confidence,
+                        'bbox': (int(x1), int(y1), int(width), int(height))
+                    })
             # distances.append(self.get_distance_from_point(depth_frame, center_x, center_y))
             
         return detections, distances
@@ -161,7 +167,8 @@ class Camera_object_detection:
                         "mid_point": (p1, p2), 
                         "class_name": "walls",
                         "distance": d2}
-                    walls.append(wall_location)
+                    if (wall_location["distance"] > 0 and wall_location["distance"] <= 2.2):
+                        walls.append(wall_location)
         return walls
     
                     
@@ -277,7 +284,11 @@ class Camera_object_detection:
 
     def run_detection(self):
         command = "none"
+        hazard = None
+        hazard_dist = None
         prev_command = "n/a"
+        prev = None
+        prev_dist = None
         state = "OFF" # initalize state to be off
         try:
             while True:
@@ -317,15 +328,20 @@ class Camera_object_detection:
     
                     # Detect objects
                     # detections = self.object_detection(color_image)
-                    object_detections, distances = self.object_detection(color_image, depth_image)
+                    object_detections, distances = self.object_detection(color_image, depth_image, CENTER_REGION)
     
                     if (object_detections != [] or wall_detections != []):
                         prev_command = command
-                        command = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
+                        prev = hazard
+                        prev_dist = hazard_dist
+                        command, hazard, hazard_dist = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
                     else:
-                        prev_command = command
+                        if (prev != None):
+                            prev_command = command
+                            prev = hazard
+                            prev_dist = hazard_dist
                         command = "none"
-                    send_haptic_command(command, prev_command)
+                    send_haptic_command(command, prev_command, hazard, prev, hazard_dist, prev_dist)
     
                     # Draw detections
                     annotated_image = self.draw_bounding_boxes(color_image.copy(), object_detections, distances)
@@ -373,9 +389,13 @@ class Camera_object_detection:
 "object turn right"
 "stairs"
 '''
-def send_haptic_command(command, prev_command):
+def send_haptic_command(command, prev_command, hazard, prev, hazard_dist, prev_dist):
     # print("Starting stair haptic...\n")
     # if (prev_command != command):
+    if (hazard != None and prev != None):
+        if (prev_command == command and hazard["class_name"] == prev["class_name"] and ((prev_dist != None and hazard_dist != None) and prev_dist - hazard_dist <= 0.1)):
+            command = "none"
+    
     ser.write((command + "\n").encode())
     print(f"Haptic command {command} sent")
     # else:
@@ -435,9 +455,9 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_
         
         if (CENTER_REGION[0] < x_right or x_left < CENTER_REGION[1]):
             if (detection["class_name"] == "stairs"):
-                return "stairs"
+                return "stairs", detection, curr_distance
             elif (detection["class_name"] == "oven"):
-                return "stairs"
+                return "stairs", detection, curr_distance
             if (curr_distance != 0 and (nearest_distance == None or curr_distance <= nearest_distance)):
                 second_distance = nearest_distance
                 nearest_distance = curr_distance
@@ -464,14 +484,14 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_
             
     # Deciding object haptic response to send
     if (nearest_hazard == None):
-        return "none"
+        return "none", None, None
     if (nearest_hazard["class_name"] == "stairs"):
-        return "stairs"
+        return "stairs", nearest_hazard, nearest_distance
     elif (nearest_hazard["class_name"] == "walls"):
         print("\n \n\nWall action function...         ")
-        return decide_wall_action(nearest_hazard, CENTER_X)
+        return decide_wall_action(nearest_hazard, CENTER_X), nearest_hazard, nearest_distance
     else:
-        return decide_object_action(nearest_hazard, second_nearest, CENTER_X)
+        return decide_object_action(nearest_hazard, second_nearest, CENTER_X), nearest_hazard, nearest_distance
 
 # decides the proper move after detecting a wall
 def decide_wall_action(nearest_hazard, CENTER_X):
@@ -503,7 +523,7 @@ if __name__ == "__main__":
     detector = Camera_object_detection(
         stairs_model_path="best.pt",
         coco_model_path="yolov8n.pt",
-        confidence_threshold=0.5
+        confidence_threshold=0.55
     )
     detector.run_detection()
 
