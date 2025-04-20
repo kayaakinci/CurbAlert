@@ -85,9 +85,9 @@ class Camera_object_detection:
     
     # def object_detection(self, rgb_image):
     # Now returns list of objects detected along with list of distances to the center points of the objects
-    def object_detection(self, rgb_image, depth_frame, CENTER_REGION):
+    def object_detection(self, rgb_image, depth_frame, CENTER_REGION, bottom_y):
         # Run both models
-        stairs_results = self.stairs_model(rgb_image, conf=0.7, verbose=False)[0]
+        stairs_results = self.stairs_model(rgb_image, conf=0.45, verbose=False)[0]
         coco_results = self.coco_model(rgb_image, conf=self.confidence_threshold, verbose=False)[0]
 
         # Process results
@@ -106,17 +106,30 @@ class Camera_object_detection:
 
             center_x = int(x1 + (width//2))
             center_y = int(y1 + (height//2))
-            hazard_dist = self.get_distance_from_point(depth_frame, center_x, center_y)
-            if (hazard_dist > 0 and hazard_dist <= 2.2):
-                # Checking if in center of frame
-                if ((x1 >= CENTER_REGION[0] and x1 < CENTER_REGION[1]) or (x2 <= CENTER_REGION[1] and x2 > CENTER_REGION[0])):
-                    distances.append(((center_x, center_y), hazard_dist))
-                    detections.append({
+            if (y2 > bottom_y):
+                y2 = bottom_y
+            hazard_dist = self.get_distance_from_point(depth_frame, center_x, y2)
+            if (class_id == self.stairs_class_id):
+                print("STAIRS DETECTIONS ARE: ", result)
+                print("\n")
+                # if (hazard_dist > 0 and hazard_dist <= 2.2):
+                    # Checking if in center of frame
+                #if ((x1 >= CENTER_REGION[0] and x1 < CENTER_REGION[1]) or (x2 <= CENTER_REGION[1] and x2 > CENTER_REGION[0])):
+                print("x: ", center_x, "y2 ", y2, "hazard_distance ", hazard_dist, "\n")
+                center_x = int(center_x)
+                y2 = int(y2)
+                hazard_dist = int(hazard_dist)
+
+                if hazard_dist == 0:
+                    # used to get rid of error with stairs distance, and this gives stairs the highest priority
+                    hazard_dist = 0.1
+                distances.append(((center_x, y2), hazard_dist))
+                detections.append({
                         'class_id': self.stairs_class_id,  # Use our stairs class ID
                         'class_name': 'stairs',
                         'confidence': confidence,
                         'bbox': (int(x1), int(y1), int(width), int(height))
-                    })
+                })
         
         
         # Then process COCO model results
@@ -151,18 +164,18 @@ class Camera_object_detection:
 
     def find_wall_detections(self, list_of_points):
         walls = []
-        print("In wall detections \n")
-        print( "\nList of points ", list_of_points)
+        #print("In wall detections \n")
+        #print( "\nList of points ", list_of_points)
 
-        print("\n Length is: ", len(list_of_points))
+        #print("\n Length is: ", len(list_of_points))
         for i in range(len(list_of_points) -1 ):
             (p1, d1) = list_of_points[i]
-            print("\n point 1 :", (p1, d1)) 
+            #print("\n point 1 :", (p1, d1)) 
             if d1 == 0:
                 # skip invalid distances of 0
                 continue
             (p2, d2) = list_of_points[i + 1]
-            print(" \nsecond point: ", (p2, d2), "\n\n")
+            #print(" \nsecond point: ", (p2, d2), "\n\n")
             if d2 == 0:
                 continue
                     # skip invalid distances of 0
@@ -212,7 +225,7 @@ class Camera_object_detection:
         list_of_points = list(final_distances.items())
 
         wall_detections = self.find_wall_detections(list_of_points)
-        print("\n\n Wall Detections are: ", wall_detections) 
+       # print("\n\n Wall Detections are: ", wall_detections) 
                     
         return final_distances, wall_detections
 
@@ -336,10 +349,11 @@ class Camera_object_detection:
                     # middle of screen region where objects are hazards
                     CENTER_REGION = (int(color_image.shape[1] * 0.4), int(color_image.shape[1] * 0.6))
                     CENTER_X = color_image.shape[1] // 2
+                    bottom_y = color_image.shape[0] - 5
     
                     # Detect objects
                     # detections = self.object_detection(color_image)
-                    object_detections, distances = self.object_detection(color_image, depth_image, CENTER_REGION)
+                    object_detections, distances = self.object_detection(color_image, depth_image, CENTER_REGION, bottom_y)
     
                     if (object_detections != [] or wall_detections != []):
                         prev_command = command
@@ -384,7 +398,7 @@ class Camera_object_detection:
 
                 # Exit on ESC key
                 key = cv2.waitKey(1)
-                if key == 27:  # esc
+                if key == 27:  # esc172.17.0.1
                     break
                 
 
@@ -418,7 +432,7 @@ def decide_object_action(nearest_hazard, second_hazard, CENTER_X):
     # Using global CENTER_REGION
     if (nearest_hazard == None): return 'none'
     x_nearest, y_nearest, w_nearest, h_nearest = nearest_hazard['bbox']
-    x_center_nearest = x_nearest + (x_nearest + w_nearest)//2
+    x_center_nearest = (x_nearest + (x_nearest + w_nearest))//2
     x_right_nearest = x_nearest + w_nearest
     x_left_nearest = x_nearest
 
@@ -429,7 +443,7 @@ def decide_object_action(nearest_hazard, second_hazard, CENTER_X):
             return "object turn left"
     
     x_second, y_second, w_second, h_second = second_hazard['bbox']
-    x_center_second = x_second + (x_second + w_second)//2
+    x_center_second = (x_second + (x_second + w_second))//2
     x_right_second = x_second + w_second
     x_left_second = x_second
     
@@ -460,7 +474,7 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_
         curr_distance = distances[i][1]
     # for detection in detections:
         x, y, w, h = detection['bbox']
-        x_center = x + (x + w)//2
+        x_center = (x + (x + w))//2
         x_right = x + w
         x_left = x
         
@@ -521,18 +535,27 @@ def get_center_point(two_points):
     p1, p2 = two_points
     x1, y1 = p1
     x2, y2 = p2
-    center_x = (x1 + x2) / 2
-    center_y = (y1 + y2) / 2
+    center_x = (x1 + x2) // 2
+    center_y = (y1 + y2) // 2
     return (center_x,center_y) 
+
+def wait_for_qtpy():
+    while True:
+        try:
+            ser = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
+            return ser
+        except serial.SerialException:
+            time.sleep(1)
 
 if __name__ == "__main__":
     # Connecting to the haptics motor controller
-    ser = serial.Serial('/dev/ttyACM0', 9600)
+    # ser = serial.Serial('/dev/ttyACM0', 9600)
+    ser = wait_for_qtpy()
     time.sleep(2)
         
 
     detector = Camera_object_detection(
-        stairs_model_path="best.pt",
+        stairs_model_path="best_aug.pt",
         coco_model_path="yolov8n.pt",
         confidence_threshold=0.55
     )
