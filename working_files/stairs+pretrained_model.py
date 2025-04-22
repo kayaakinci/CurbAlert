@@ -149,7 +149,7 @@ class Camera_object_detection:
             center_y = int(y1 + (height//2))
             hazard_dist = self.get_distance_from_point(depth_frame, center_x, center_y)
             
-            if (hazard_dist > 0 and hazard_dist <= 2.2):
+            if (hazard_dist >= 0.6 and hazard_dist <= 2.2):
                 if ((x1 >= CENTER_REGION[0] and x1 < CENTER_REGION[1]) or (x2 <= CENTER_REGION[1] and x2 > CENTER_REGION[0])):
                     distances.append(((center_x, center_y), hazard_dist))
                     detections.append({
@@ -185,7 +185,7 @@ class Camera_object_detection:
                     "mid_point": (p1, p2), 
                     "class_name": "walls",
                     "distance": d2}
-                if (wall_location["distance"] > 0 and wall_location["distance"] <= 2.2):
+                if (wall_location["distance"] > 0.6 and wall_location["distance"] <= 2.2):
                     walls.append(wall_location)
         return walls
     
@@ -331,6 +331,31 @@ class Camera_object_detection:
                     continue
                 if state == "ON":
                     
+                    # # Wall Detection
+                    # wall_distances, wall_detections = self.get_depth_distances(depth_image)
+    
+                    # # Draw distance points
+                    # for (x,y), distance in wall_distances.items():
+                    #     cv2.circle(color_image, (x, y), 6, (0, 0, 255), -1)
+                    #     cv2.putText(color_image, f"{distance:.2f}m", (x+5, y-5),
+                    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
+    
+                    # # draw wall detections
+                    # for item in wall_detections:
+                    #     (p1, p2) = item["mid_point"]
+                    #     cv2.circle(color_image, p1, 10, (255, 0, 255), -1)
+                    #     cv2.circle(color_image, p2, 10, (255, 0, 255), -1)
+                    
+                    # middle of screen region where objects are hazards
+                    CENTER_REGION = (int(color_image.shape[1] * 0.4), int(color_image.shape[1] * 0.6))
+                    CENTER_X = color_image.shape[1] // 2
+                    bottom_y = color_image.shape[0] - 5
+    
+                    # Detect objects
+                    # detections = self.object_detection(color_image)
+                    object_detections, distances = self.object_detection(color_image, depth_image, CENTER_REGION, bottom_y)
+
+
                     # Wall Detection
                     wall_distances, wall_detections = self.get_depth_distances(depth_image)
     
@@ -345,16 +370,8 @@ class Camera_object_detection:
                         (p1, p2) = item["mid_point"]
                         cv2.circle(color_image, p1, 10, (255, 0, 255), -1)
                         cv2.circle(color_image, p2, 10, (255, 0, 255), -1)
+        
                     
-                    # middle of screen region where objects are hazards
-                    CENTER_REGION = (int(color_image.shape[1] * 0.4), int(color_image.shape[1] * 0.6))
-                    CENTER_X = color_image.shape[1] // 2
-                    bottom_y = color_image.shape[0] - 5
-    
-                    # Detect objects
-                    # detections = self.object_detection(color_image)
-                    object_detections, distances = self.object_detection(color_image, depth_image, CENTER_REGION, bottom_y)
-    
                     if (object_detections != [] or wall_detections != []):
                         prev_command = command
                         prev = hazard
@@ -366,6 +383,7 @@ class Camera_object_detection:
                             prev = hazard
                             prev_dist = hazard_dist
                         command = "none"
+                        
                     send_haptic_command(command, prev_command, hazard, prev, hazard_dist, prev_dist)
     
                     # Draw detections
@@ -502,9 +520,10 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_
     # look through wall detections
     for wall in wall_detections:
         wall_dist = wall["distance"]
-        if (nearest_hazard is None or wall_dist <= nearest_distance):
-            nearest_distance = wall_dist
-            nearest_hazard = wall
+        if (nearest_hazard is None or wall_dist < nearest_distance):
+            if (not wall_in_obj(wall, nearest_hazard)):
+                nearest_distance = wall_dist
+                nearest_hazard = wall
     print("   After wall search, nearest hazard is", nearest_hazard)
             
     # Deciding object haptic response to send
@@ -517,6 +536,21 @@ def decide_haptic_response(detections, distances, CENTER_X, CENTER_REGION, wall_
         return decide_wall_action(nearest_hazard, CENTER_X), nearest_hazard, nearest_distance
     else:
         return decide_object_action(nearest_hazard, second_nearest, CENTER_X), nearest_hazard, nearest_distance
+
+def wall_in_obj(wall, nearest_hazard):
+    if (wall == None or nearest_hazard == None):
+        return False
+    elif (nearest_hazard["class_name"] == "walls"):
+        return False
+    wall_x, wall_y = get_center_point(wall["mid_point"])
+    x1, y1, w, h = nearest_hazard["bbox"]
+    x2 = x1 + w
+    y2 = y1 + h
+
+    if (wall_x >= x1 and wall_x <= x2):
+        if (wall_y >= y1 and wall_y <= y2):
+            return True
+    return False
 
 # decides the proper move after detecting a wall
 def decide_wall_action(nearest_hazard, CENTER_X):
