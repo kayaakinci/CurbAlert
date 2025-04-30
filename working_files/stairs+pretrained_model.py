@@ -313,134 +313,150 @@ class Camera_object_detection:
         prev_command = "n/a"
         prev = None
         prev_dist = None
-        state = "OFF" # initalize state to be off
+        state = "OFF"  # initialize state to be off
+        
+        # Add state tracking variables
+        previous_fsr_state = "OFF"  # Track previous FSR state
+        current_hazard_id = None    # Track unique hazard instances
+        notification_sent = False   # Track if we've already sent a notification for this placement
+        
         try:
             while True:
-                if ser.in_waiting >0:
+                if ser.in_waiting > 0:
                     line = ser.readline().decode('utf-8').strip()
+                    
                     if line in ["ON", "OFF"]:
-                        state = line
+                        # FSR state has changed
+                        if line == "ON" and previous_fsr_state == "OFF":
+                            # Cane just placed - reset notification flag
+                            notification_sent = False
+                            print("Cane placed - ready for new hazard detection")
+                        elif line == "OFF" and previous_fsr_state == "ON":
+                            # Cane just lifted - reset hazard tracking
+                            current_hazard_id = None
+                            print("Cane lifted - hazard tracking reset")
                         
-            
+                        previous_fsr_state = line
+                        state = line  # Keep using state for display/pausing
+                
                 start_time = time.time()
-
+    
                 # Process frames
                 color_image, depth_image = self.process_stream()
                 if color_image is None:
                     print("Failed to capture frame")
                     continue
+                    
                 if state == "ON":
-                    
-                    # # Wall Detection
-                    # wall_distances, wall_detections = self.get_depth_distances(depth_image)
-    
-                    # # Draw distance points
-                    # for (x,y), distance in wall_distances.items():
-                    #     cv2.circle(color_image, (x, y), 6, (0, 0, 255), -1)
-                    #     cv2.putText(color_image, f"{distance:.2f}m", (x+5, y-5),
-                    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
-    
-                    # # draw wall detections
-                    # for item in wall_detections:
-                    #     (p1, p2) = item["mid_point"]
-                    #     cv2.circle(color_image, p1, 10, (255, 0, 255), -1)
-                    #     cv2.circle(color_image, p2, 10, (255, 0, 255), -1)
-                    
-                    # middle of screen region where objects are hazards
+                    # Define regions of interest
                     CENTER_REGION = (int(color_image.shape[1] * 0.4), int(color_image.shape[1] * 0.6))
                     CENTER_X = color_image.shape[1] // 2
                     bottom_y = color_image.shape[0] - 5
-    
+                    
                     # Detect objects
-                    # detections = self.object_detection(color_image)
                     object_detections, distances = self.object_detection(color_image, depth_image, CENTER_REGION, bottom_y)
-
-
+    
                     # Wall Detection
                     wall_distances, wall_detections = self.get_depth_distances(depth_image)
-    
+                    
                     # Draw distance points
                     for (x,y), distance in wall_distances.items():
                         cv2.circle(color_image, (x, y), 6, (0, 0, 255), -1)
                         cv2.putText(color_image, f"{distance:.2f}m", (x+5, y-5),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
-    
-                    # draw wall detections
+                    
+                    # Draw wall detections
                     for item in wall_detections:
                         (p1, p2) = item["mid_point"]
                         cv2.circle(color_image, p1, 10, (255, 0, 255), -1)
                         cv2.circle(color_image, p2, 10, (255, 0, 255), -1)
-
-                    
-        
-                    
-                    # if (object_detections != [] or wall_detections != []):
-                    #     prev_command = command
-                    #     prev = hazard
-                    #     prev_dist = hazard_dist
-                    #     command, hazard, hazard_dist = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
-                    # else:
-                    #     if (prev != None):
-                    #         prev_command = command
-                    #         prev = hazard
-                    #         prev_dist = hazard_dist
-                    #     command = "none"
-
-                    # Downstairs Detection:
-                    # get the distance at the bottom eight portion for downwords stairs
+    
+                    # Downstairs Detection
                     downstairs_x = color_image.shape[1]// 2
-                    downstairs_y = int((3 *color_image.shape[0]) / 4)
-
+                    downstairs_y = int((3 * color_image.shape[0]) / 4)
+    
                     distance_downstairs1 = self.get_distance_from_point(depth_image, downstairs_x - 50, downstairs_y - 100)
                     distance_downstairs2 = self.get_distance_from_point(depth_image, downstairs_x + 50, downstairs_y - 100)
                     distance_downstairs3 = self.get_distance_from_point(depth_image, downstairs_x - 50, downstairs_y)
                     distance_downstairs4 = self.get_distance_from_point(depth_image, downstairs_x + 50, downstairs_y)
                     
-
-                    if ((distance_downstairs1 == 0 and distance_downstairs2 == 0 and distance_downstairs3 == 0 and distance_downstairs4 == 0) or (distance_downstairs1 > 1.3 and distance_downstairs2 > 1.3 and distance_downstairs3 > 0.7 and distance_downstairs4 > 0.7)):
-                        # downstairs command
-                        if (prev_command != "stairs down" and command != "stairs down"):
-                            prev_command = command
-                            prev = None
-                            prev_distance = None
-                            command = "stairs down"
+                    # Determine if there's a hazard and what kind
+                    if ((distance_downstairs1 == 0 and distance_downstairs2 == 0 and 
+                         distance_downstairs3 == 0 and distance_downstairs4 == 0) or 
+                        (distance_downstairs1 > 1.3 and distance_downstairs2 > 1.3 and 
+                         distance_downstairs3 > 0.7 and distance_downstairs4 > 0.7)):
+                        # Downstairs detected
+                        command = "stairs down"
+                        hazard = {"class_name": "stairs down"}
+                        hazard_dist = min(filter(lambda x: x > 0, [distance_downstairs1, distance_downstairs2, 
+                                                                  distance_downstairs3, distance_downstairs4] + [999]))
+                        hazard_id = "stairs_down"
+                    elif object_detections or wall_detections:
+                        # Object or wall detected
+                        command, hazard, hazard_dist = decide_haptic_response(object_detections, distances, 
+                                                                             CENTER_X, CENTER_REGION, wall_detections)
+                        
+                        # Generate a unique identifier for this hazard
+                        if hazard is not None:
+                            if "class_name" in hazard:
+                                hazard_class = hazard["class_name"]
+                                # Create a unique ID based on class and approximate position
+                                if "bbox" in hazard:
+                                    x, y, w, h = hazard["bbox"]
+                                    hazard_id = f"{hazard_class}_{x//50}_{y//50}"
+                                elif "mid_point" in hazard:  # For walls
+                                    center = get_center_point(hazard["mid_point"])
+                                    hazard_id = f"{hazard_class}_{center[0]//50}_{center[1]//50}"
+                            else:
+                                hazard_id = None
                     else:
-                        if (object_detections != [] or wall_detections != []):
-                            prev_command = command
-                            prev = hazard
-                            prev_dist = hazard_dist
-                            command, hazard, hazard_dist = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
-                        else:
-                            if (prev != None):
-                                prev_command = command
-                                prev = hazard
-                                prev_dist = hazard_dist
-                            command = "none"
+                        # No hazard detected
+                        command = "none"
+                        hazard = None
+                        hazard_dist = None
+                        hazard_id = None
                     
+                    # Determine whether to send haptic feedback
+                    should_send = False
                     
-                    send_haptic_command(command, prev_command, hazard, prev, hazard_dist, prev_dist)
-    
+                    # Only send a notification if:
+                    # 1. FSR state is ON (cane is placed)
+                    # 2. We haven't sent a notification for this placement yet
+                    # 3. There is a hazard to report
+                    if previous_fsr_state == "ON" and not notification_sent and hazard is not None:
+                        should_send = True
+                        notification_sent = True  # Mark that we've sent a notification for this placement
+                        current_hazard_id = hazard_id
+                        print(f"New hazard detected: {command}")
+                    
+                    # Send the haptic command if needed
+                    if should_send:
+                        send_haptic_command(command, prev_command, hazard, prev, hazard_dist, prev_dist)
+                        prev_command = command
+                        prev = hazard
+                        prev_dist = hazard_dist
+                    
                     # Draw detections
                     annotated_image = self.draw_bounding_boxes(color_image.copy(), object_detections, distances)
-
-                    # Draw downstairs dots
-                    cv2.circle(annotated_image, (downstairs_x - 50, downstairs_y - 100), 5, (255, 255, 255), -1) # dot marker for downwards stairs
-                    cv2.putText(annotated_image, f"{distance_downstairs1:.2f}m", (downstairs_x - 50 - 10, downstairs_y - 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    cv2.circle(annotated_image, (downstairs_x + 50, downstairs_y - 100), 5, (255, 255, 255), -1) # dot marker for downwards stairs
-                    cv2.putText(annotated_image, f"{distance_downstairs2:.2f}m", (downstairs_x + 50 - 10, downstairs_y - 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-                    cv2.circle(annotated_image, (downstairs_x - 50, downstairs_y), 5, (255, 255, 255), -1) # dot marker for downwards stairs
-                    cv2.putText(annotated_image, f"{distance_downstairs3:.2f}m", (downstairs_x - 50 - 10, downstairs_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-
-                    cv2.circle(annotated_image, (downstairs_x + 50, downstairs_y), 5, (255, 255, 255), -1) # dot marker for downwards stairs
-                    cv2.putText(annotated_image, f"{distance_downstairs4:.2f}m", (downstairs_x + 50 - 10, downstairs_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     
+                    # Draw downstairs dots
+                    cv2.circle(annotated_image, (downstairs_x - 50, downstairs_y - 100), 5, (255, 255, 255), -1)
+                    cv2.putText(annotated_image, f"{distance_downstairs1:.2f}m", (downstairs_x - 50 - 10, downstairs_y - 100), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.circle(annotated_image, (downstairs_x + 50, downstairs_y - 100), 5, (255, 255, 255), -1)
+                    cv2.putText(annotated_image, f"{distance_downstairs2:.2f}m", (downstairs_x + 50 - 10, downstairs_y - 100), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.circle(annotated_image, (downstairs_x - 50, downstairs_y), 5, (255, 255, 255), -1)
+                    cv2.putText(annotated_image, f"{distance_downstairs3:.2f}m", (downstairs_x - 50 - 10, downstairs_y), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.circle(annotated_image, (downstairs_x + 50, downstairs_y), 5, (255, 255, 255), -1)
+                    cv2.putText(annotated_image, f"{distance_downstairs4:.2f}m", (downstairs_x + 50 - 10, downstairs_y), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    
                     # Calculate FPS
                     fps = 1.0 / (time.time() - start_time)
-    
-    
                     
+                    # Add FSR state and current command to display
                     cv2.putText(
                         annotated_image, 
                         f"FPS: {fps:.2f}", 
@@ -450,26 +466,37 @@ class Camera_object_detection:
                         (0, 255, 0), 
                         2
                     )
-
                     
-
-
-                        
-    
+                    cv2.putText(
+                        annotated_image, 
+                        f"FSR: {previous_fsr_state}", 
+                        (10, 70), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, 
+                        (0, 255, 0), 
+                        2
+                    )
+                    
+                    cv2.putText(
+                        annotated_image, 
+                        f"CMD: {command if should_send else 'none'}", 
+                        (10, 110), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, 
+                        (0, 255, 0), 
+                        2
+                    )
+                    
                     cv2.imshow("Object Detection", annotated_image)
                 else:
                     cv2.putText(color_image, "Model Paused", (500, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
                     cv2.imshow("Object Detection", color_image)
-    
                     
-    
-
                 # Exit on ESC key
                 key = cv2.waitKey(1)
-                if key == 27:  # esc172.17.0.1
+                if key == 27:  # esc
                     break
-                
-
+                    
         finally:
             # happens whether an exception is raised or not
             self.pipeline.stop()
@@ -483,16 +510,9 @@ class Camera_object_detection:
 "stairs"
 '''
 def send_haptic_command(command, prev_command, hazard, prev, hazard_dist, prev_dist):
-    # print("Starting stair haptic...\n")
-    # if (prev_command != command):
-    if (hazard != None and prev != None):
-        if (prev_command == command and hazard["class_name"] == prev["class_name"] and ((prev_dist != None and hazard_dist != None) and prev_dist - hazard_dist <= 0.1)):
-            command = "none"
-    
-    ser.write((command + "\n").encode())
-    print(f"Haptic command {command} sent")
-    # else:
-        # print("no haptics")
+    if command != "none":
+        ser.write((command + "\n").encode())
+        print(f"Haptic command {command} sent")
 
 def decide_object_action(nearest_hazard, second_hazard, CENTER_X):
     action = "none"
