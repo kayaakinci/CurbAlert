@@ -374,34 +374,48 @@ class Camera_object_detection:
                     
         
                     
-                    if (object_detections != [] or wall_detections != []):
-                        prev_command = command
-                        prev = hazard
-                        prev_dist = hazard_dist
-                        command, hazard, hazard_dist = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
-                    else:
-                        if (prev != None):
-                            prev_command = command
-                            prev = hazard
-                            prev_dist = hazard_dist
-                        command = "none"
+                    # if (object_detections != [] or wall_detections != []):
+                    #     prev_command = command
+                    #     prev = hazard
+                    #     prev_dist = hazard_dist
+                    #     command, hazard, hazard_dist = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
+                    # else:
+                    #     if (prev != None):
+                    #         prev_command = command
+                    #         prev = hazard
+                    #         prev_dist = hazard_dist
+                    #     command = "none"
 
                     # Downstairs Detection:
                     # get the distance at the bottom eight portion for downwords stairs
                     downstairs_x = color_image.shape[1]// 2
                     downstairs_y = int((3 *color_image.shape[0]) / 4)
 
-                    distance_downstairs1 = self.get_distance_from_point(depth_image, downstairs_x - 25, downstairs_y)
-                    distance_downstairs2 = self.get_distance_from_point(depth_image, downstairs_x + 25, downstairs_y)
+                    distance_downstairs1 = self.get_distance_from_point(depth_image, downstairs_x - 50, downstairs_y - 100)
+                    distance_downstairs2 = self.get_distance_from_point(depth_image, downstairs_x + 50, downstairs_y - 100)
+                    distance_downstairs3 = self.get_distance_from_point(depth_image, downstairs_x - 50, downstairs_y)
+                    distance_downstairs4 = self.get_distance_from_point(depth_image, downstairs_x + 50, downstairs_y)
                     
 
-                    if ((distance_downstairs1 == 0 and distance_downstairs2 == 0) or (distance_downstairs1 > 0.8 and distance_downstairs2 > 0.8)):
+                    if ((distance_downstairs1 == 0 and distance_downstairs2 == 0 and distance_downstairs3 == 0 and distance_downstairs4 == 0) or (distance_downstairs1 > 1.3 and distance_downstairs2 > 1.3 and distance_downstairs3 > 0.7 and distance_downstairs4 > 0.7)):
                         # downstairs command
-                        if (prev_command != "stairs down"):
+                        if (prev_command != "stairs down" and command != "stairs down"):
                             prev_command = command
                             prev = None
                             prev_distance = None
                             command = "stairs down"
+                    else:
+                        if (object_detections != [] or wall_detections != []):
+                            prev_command = command
+                            prev = hazard
+                            prev_dist = hazard_dist
+                            command, hazard, hazard_dist = decide_haptic_response(object_detections, distances, CENTER_X, CENTER_REGION, wall_detections)
+                        else:
+                            if (prev != None):
+                                prev_command = command
+                                prev = hazard
+                                prev_dist = hazard_dist
+                            command = "none"
                     
                     
                     send_haptic_command(command, prev_command, hazard, prev, hazard_dist, prev_dist)
@@ -410,10 +424,17 @@ class Camera_object_detection:
                     annotated_image = self.draw_bounding_boxes(color_image.copy(), object_detections, distances)
 
                     # Draw downstairs dots
-                    cv2.circle(annotated_image, (downstairs_x - 25, downstairs_y), 5, (255, 255, 255), -1) # dot marker for downwards stairs
-                    cv2.putText(annotated_image, f"{distance_downstairs1:.2f}m", (downstairs_x -25 - 150, downstairs_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    cv2.circle(annotated_image, (downstairs_x + 25, downstairs_y), 5, (255, 255, 255), -1) # dot marker for downwards stairs
-                    cv2.putText(annotated_image, f"{distance_downstairs2:.2f}m", (downstairs_x +25 - 150, downstairs_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.circle(annotated_image, (downstairs_x - 50, downstairs_y - 100), 5, (255, 255, 255), -1) # dot marker for downwards stairs
+                    cv2.putText(annotated_image, f"{distance_downstairs1:.2f}m", (downstairs_x - 50 - 10, downstairs_y - 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.circle(annotated_image, (downstairs_x + 50, downstairs_y - 100), 5, (255, 255, 255), -1) # dot marker for downwards stairs
+                    cv2.putText(annotated_image, f"{distance_downstairs2:.2f}m", (downstairs_x + 50 - 10, downstairs_y - 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+                    cv2.circle(annotated_image, (downstairs_x - 50, downstairs_y), 5, (255, 255, 255), -1) # dot marker for downwards stairs
+                    cv2.putText(annotated_image, f"{distance_downstairs3:.2f}m", (downstairs_x - 50 - 10, downstairs_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+
+                    cv2.circle(annotated_image, (downstairs_x + 50, downstairs_y), 5, (255, 255, 255), -1) # dot marker for downwards stairs
+                    cv2.putText(annotated_image, f"{distance_downstairs4:.2f}m", (downstairs_x + 50 - 10, downstairs_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     
                     # Calculate FPS
                     fps = 1.0 / (time.time() - start_time)
